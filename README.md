@@ -10,7 +10,8 @@ vienen los datos.
 ```
 connectors/
   garmin/sync.py   ← ACTIVO. Login Garmin, lee wellness + actividades.
-  polar/sync.py    ← stub, pendiente de credenciales/API
+  polar/authorize.py ← ACTIVO (manual). OAuth2, se ejecuta una vez por atleta.
+  polar/sync.py    ← ACTIVO. Cron diario, usa el modelo de transacciones de Polar.
   huawei/sync.py   ← stub, pendiente de credenciales/API
   coros/sync.py    ← stub, pendiente de credenciales/API
 
@@ -48,11 +49,31 @@ No hace falta tocar los conectores de marca.
 
 ## Secrets necesarios (GitHub Actions)
 
+**Garmin:**
 - `GARMIN_EMAIL`
 - `GARMIN_PASSWORD`
 
-(Polar/Huawei/Coros usarán tokens OAuth2 por atleta cuando se
-implementen — ver cada conector.)
+**Polar** (por app, una sola vez):
+- `POLAR_CLIENT_ID`
+- `POLAR_CLIENT_SECRET`
+
+**Polar** (por atleta vinculado — ver `connectors/polar/authorize.py`):
+- `POLAR_ACCESS_TOKEN_<ATLETA>` ej. `POLAR_ACCESS_TOKEN_CGR`
+- `POLAR_USER_ID_<ATLETA>` ej. `POLAR_USER_ID_CGR`
+
+Y la variable (no secret) `POLAR_ATLETAS` con la lista separada por comas
+de claves de atleta a sincronizar, ej. `CGR,nacho` (Settings → Secrets
+and variables → Actions → pestaña **Variables**).
+
+Cada atleta nuevo en Polar implica: 1) añadir sus dos secrets
+`POLAR_ACCESS_TOKEN_X` / `POLAR_USER_ID_X`, 2) añadir su clave a
+`POLAR_ATLETAS`, 3) añadir una línea `POLAR_ACCESS_TOKEN_X` /
+`POLAR_USER_ID_X` en `.github/workflows/polar-sync.yml` (GitHub Actions
+no permite nombres de secret dinámicos, así que hay que declararlos
+explícitamente).
+
+(Huawei/Coros usarán tokens OAuth2 por atleta cuando se implementen —
+ver cada conector.)
 
 ## Atletas vinculados actualmente
 
