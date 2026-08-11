@@ -1,0 +1,26 @@
+name: Garmin daily sync
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC todos los días
+  workflow_dispatch: {}     # permite lanzarlo a mano desde GitHub
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install garminconnect requests
+
+      - name: Ejecutar sync de Garmin
+        env:
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          GARMIN_ATHLETE: CGR
+        run: python connectors/garmin/sync.py
