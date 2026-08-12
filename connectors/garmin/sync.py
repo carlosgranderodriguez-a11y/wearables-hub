@@ -64,24 +64,44 @@ def obtener_fc_umbral(client):
     """
     FC umbral (LTHR) del atleta, necesaria para calcular hrTSS.
 
-    Se intenta leer de Garmin (test de umbral de lactato). Si Garmin no la
-    tiene, se puede fijar a mano con la variable de entorno GARMIN_FC_UMBRAL.
-    Sin umbral no se puede calcular hrTSS — se devuelve None y ese campo
-    simplemente queda vacío, sin romper el resto del sync.
+    Prioridad, de más a menos dinámico:
+      1. El valor que Garmin mantiene y va actualizando conforme entrenas.
+      2. El Secret GARMIN_FC_UMBRAL, como respaldo si Garmin no lo tiene.
+      3. Estimación desde la FC máxima (~88%), solo como último recurso.
+
+    Se prefiere el de Garmin justamente porque el umbral se desplaza con
+    la forma física: fijarlo a mano haría que el TSS fuese perdiendo
+    fidelidad a medida que mejoras.
     """
+    lt = safe(lambda: client.get_lactate_threshold(latest=True), "FC umbral")
+    if isinstance(lt, dict):
+        # La respuesta varía de forma según versión de la API; se buscan las
+        # claves más habituales sin asumir una estructura fija.
+        for key in ("heartRate", "lactateThresholdHeartRate", "value"):
+            val = lt.get(key)
+            if isinstance(val, (int, float)) and val > 0:
+                print(f"FC umbral desde Garmin: {int(val)} ppm")
+                return int(val)
+
     manual = os.environ.get("GARMIN_FC_UMBRAL", "").strip()
     if manual.isdigit():
+        print(f"FC umbral desde Secret GARMIN_FC_UMBRAL: {manual} ppm")
         return int(manual)
 
-    lt = safe(lambda: client.get_lactate_threshold(latest=True), "FC umbral")
-    if not lt:
-        return None
-    # La respuesta varía de forma según versión de la API; se buscan las
-    # claves más habituales sin asumir una estructura fija.
-    for key in ("heartRate", "lactateThresholdHeartRate", "value"):
-        val = lt.get(key) if isinstance(lt, dict) else None
-        if isinstance(val, (int, float)) and val > 0:
-            return int(val)
+    # Último recurso: estimar desde la FC máxima registrada por Garmin.
+    # Es una aproximación gruesa — mejor tener el dato real.
+    hr_zones = safe(lambda: client.get_heart_rate_zones(), "zonas FC perfil")
+    fc_max = None
+    if isinstance(hr_zones, list):
+        for perfil in hr_zones:
+            if isinstance(perfil, dict) and perfil.get("maxHeartRateUsed"):
+                fc_max = perfil["maxHeartRateUsed"]
+                break
+    if fc_max:
+        estimado = int(fc_max * 0.88)
+        print(f"FC umbral estimada desde FC máx ({fc_max}): {estimado} ppm (aproximado)")
+        return estimado
+
     return None
 
 
