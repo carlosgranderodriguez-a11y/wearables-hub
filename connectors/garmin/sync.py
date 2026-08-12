@@ -60,48 +60,109 @@ def normalizar_tipo(type_key):
     return "other"
 
 
-def obtener_fc_umbral(client):
+def buscar_valor_recursivo(obj, claves):
     """
-    FC umbral (LTHR) del atleta, necesaria para calcular hrTSS.
+    Busca la primera clave de `claves` dentro de una estructura anidada
+    (dicts y listas) y devuelve su valor numérico.
 
-    Prioridad, de más a menos dinámico:
-      1. El valor que Garmin mantiene y va actualizando conforme entrenas.
-      2. El Secret GARMIN_FC_UMBRAL, como respaldo si Garmin no lo tiene.
-      3. Estimación desde la FC máxima (~88%), solo como último recurso.
+    Necesario porque la forma exacta de las respuestas de Garmin cambia
+    entre versiones de la API y entre perfiles de usuario; buscar por
+    nombre de clave es más resistente que asumir una ruta fija.
+    """
+    if isinstance(obj, dict):
+        for k in claves:
+            v = obj.get(k)
+            if isinstance(v, (int, float)) and 100 < v < 240:
+                return int(v)
+        for v in obj.values():
+            r = buscar_valor_recursivo(v, claves)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = buscar_valor_recursivo(v, claves)
+            if r:
+                return r
+    return None
 
-    Se prefiere el de Garmin justamente porque el umbral se desplaza con
-    la forma física: fijarlo a mano haría que el TSS fuese perdiendo
-    fidelidad a medida que mejoras.
+
+def obtener_fc_max(client, activities=None):
+    """
+    FC máxima del atleta, probando varias fuentes en orden de fiabilidad.
+    Se usa para estimar el umbral cuando Garmin no lo tiene medido.
+    """
+    manual = os.environ.get("GARMIN_FC_MAX", "").strip()
+    if manual.isdigit():
+        return int(manual), "Secret GARMIN_FC_MAX"
+
+    claves = [
+        "maxHeartRateUsed", "maxHeartRate", "userMaxHeartRate",
+        "maxHr", "max_hr", "lactateThresholdMaxHeartRate",
+    ]
+
+    for nombre, fn in [
+        ("zonas FC del perfil", lambda: client.get_heart_rate_zones()),
+        ("ajustes de perfil", lambda: client.get_userprofile_settings()),
+        ("perfil de usuario", lambda: client.get_user_profile()),
+    ]:
+        datos = safe(fn, nombre)
+        val = buscar_valor_recursivo(datos, claves)
+        if val:
+            return val, nombre
+
+    # Último recurso: la FC más alta registrada hoy en sus propias actividades.
+    # Es un suelo, no un techo real: si hoy no apretó, subestimará la FC máx.
+    if activities:
+        picos = [a.get("maxHR") for a in activities if isinstance(a.get("maxHR"), (int, float))]
+        if picos:
+            return int(max(picos)), "FC máx observada hoy (aproximación baja)"
+
+    return None, None
+
+
+def obtener_fc_umbral(client, activities=None):
+    """
+    FC umbral (LTHR), necesaria para calcular hrTSS.
+
+    Prioridad, de más a menos fiable:
+      1. Umbral medido que Garmin mantiene y actualiza conforme entrenas.
+      2. Secret GARMIN_FC_UMBRAL, si lo has fijado a mano.
+      3. Estimación desde la FC máxima (por defecto 88%).
+
+    Aviso sobre la opción 3: el hrTSS depende del CUADRADO de la intensidad,
+    así que un error de 8-10 ppm en el umbral se amplifica bastante en la
+    carga resultante. La estimación sirve para ver tendencias, pero para
+    comparar cargas entre semanas conviene un umbral medido de verdad
+    (test de 30' o de 20' a tope).
     """
     lt = safe(lambda: client.get_lactate_threshold(latest=True), "FC umbral")
-    if isinstance(lt, dict):
-        # La respuesta varía de forma según versión de la API; se buscan las
-        # claves más habituales sin asumir una estructura fija.
-        for key in ("heartRate", "lactateThresholdHeartRate", "value"):
-            val = lt.get(key)
-            if isinstance(val, (int, float)) and val > 0:
-                print(f"FC umbral desde Garmin: {int(val)} ppm")
-                return int(val)
+    val = buscar_valor_recursivo(lt, ["heartRate", "lactateThresholdHeartRate", "value"])
+    if val:
+        print(f"FC umbral: {val} ppm (medido por Garmin)")
+        return val
 
     manual = os.environ.get("GARMIN_FC_UMBRAL", "").strip()
     if manual.isdigit():
-        print(f"FC umbral desde Secret GARMIN_FC_UMBRAL: {manual} ppm")
+        print(f"FC umbral: {manual} ppm (Secret GARMIN_FC_UMBRAL)")
         return int(manual)
 
-    # Último recurso: estimar desde la FC máxima registrada por Garmin.
-    # Es una aproximación gruesa — mejor tener el dato real.
-    hr_zones = safe(lambda: client.get_heart_rate_zones(), "zonas FC perfil")
-    fc_max = None
-    if isinstance(hr_zones, list):
-        for perfil in hr_zones:
-            if isinstance(perfil, dict) and perfil.get("maxHeartRateUsed"):
-                fc_max = perfil["maxHeartRateUsed"]
-                break
+    # Estimación desde FC máx. El porcentaje es configurable por si quieres
+    # afinarlo: corredores entrenados suelen estar en 88-92% de la FC máx.
+    try:
+        pct = float(os.environ.get("GARMIN_UMBRAL_PCT", "88")) / 100.0
+    except ValueError:
+        pct = 0.88
+
+    fc_max, origen = obtener_fc_max(client, activities)
     if fc_max:
-        estimado = int(fc_max * 0.88)
-        print(f"FC umbral estimada desde FC máx ({fc_max}): {estimado} ppm (aproximado)")
+        estimado = int(round(fc_max * pct))
+        print(
+            f"FC umbral: {estimado} ppm ESTIMADO como {int(pct*100)}% de FC máx "
+            f"{fc_max} (origen: {origen}). El TSS resultante es orientativo."
+        )
         return estimado
 
+    print("⚠️  Sin FC umbral ni FC máx: no se puede calcular hrTSS.", file=sys.stderr)
     return None
 
 
@@ -215,18 +276,14 @@ def main():
     enviar_wellness_a_triatlon(atleta_key, d, wellness)
 
     # ── Actividades (repartidas según core/destinations.py) ──
-    # La FC umbral y la de reposo se leen una sola vez y se reutilizan
-    # para calcular la carga de todas las actividades del día.
-    fc_umbral = obtener_fc_umbral(client)
-    fc_reposo = wellness.get("rhr")
-    if not fc_umbral:
-        print(
-            "⚠️  Sin FC umbral: no se podrá calcular hrTSS. "
-            "Puedes fijarla con el Secret GARMIN_FC_UMBRAL.",
-            file=sys.stderr,
-        )
-
     activities = safe(lambda: client.get_activities_by_date(d, today), "actividades")
+
+    # La FC umbral y la de reposo se calculan una sola vez y se reutilizan
+    # para todas las actividades del día. Se pasan las actividades porque,
+    # si no hay otra fuente, la FC máx observada sirve de último recurso.
+    fc_umbral = obtener_fc_umbral(client, activities)
+    fc_reposo = wellness.get("rhr")
+
     if activities:
         for a in activities:
             actividad = {
