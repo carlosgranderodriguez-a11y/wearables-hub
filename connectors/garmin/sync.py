@@ -120,20 +120,51 @@ def obtener_fc_max(client, activities=None):
     return None, None
 
 
+def umbral_desde_zonas(client):
+    """
+    Deriva la FC umbral del límite inferior de la Zona 4 configurada en Garmin.
+
+    Es la mejor fuente disponible cuando no hay un test de lactato: por
+    definición, la Z4 empieza en el umbral. Además usa la configuración
+    que el propio atleta ya tiene hecha, en vez de inventar porcentajes.
+
+    Se imprime la estructura recibida para poder diagnosticarla desde el
+    log del Action, ya que el formato varía entre perfiles.
+    """
+    zonas = safe(lambda: client.get_heart_rate_zones(), "zonas FC del perfil")
+    if not zonas:
+        return None
+
+    print(f"[diagnóstico] zonas FC del perfil: {str(zonas)[:600]}")
+
+    perfiles = zonas if isinstance(zonas, list) else [zonas]
+    for perfil in perfiles:
+        if not isinstance(perfil, dict):
+            continue
+        # Garmin suele exponer los límites como zoneNLowBoundary
+        for clave in ("zone4LowBoundary", "zone4Floor", "zone4Low"):
+            val = perfil.get(clave)
+            if isinstance(val, (int, float)) and 100 < val < 220:
+                deporte = perfil.get("sport") or perfil.get("sportType") or "general"
+                print(f"FC umbral: {int(val)} ppm (inicio de Z4 configurado en Garmin, perfil '{deporte}')")
+                return int(val)
+    return None
+
+
 def obtener_fc_umbral(client, activities=None):
     """
     FC umbral (LTHR), necesaria para calcular hrTSS.
 
     Prioridad, de más a menos fiable:
-      1. Umbral medido que Garmin mantiene y actualiza conforme entrenas.
+      1. Umbral medido que Garmin mantiene (test de lactato).
       2. Secret GARMIN_FC_UMBRAL, si lo has fijado a mano.
-      3. Estimación desde la FC máxima (por defecto 88%).
+      3. Inicio de la Zona 4 configurada en Garmin — por definición, el umbral.
+      4. Porcentaje de la FC máxima (88% por defecto).
 
-    Aviso sobre la opción 3: el hrTSS depende del CUADRADO de la intensidad,
-    así que un error de 8-10 ppm en el umbral se amplifica bastante en la
-    carga resultante. La estimación sirve para ver tendencias, pero para
-    comparar cargas entre semanas conviene un umbral medido de verdad
-    (test de 30' o de 20' a tope).
+    Sobre las opciones 3 y 4: el hrTSS depende del CUADRADO de la intensidad,
+    así que un error de 8-10 ppm en el umbral se amplifica en la carga. Son
+    válidas para seguir TENDENCIAS entre semanas, pero para valores absolutos
+    comparables conviene un test real de 20-30 min.
     """
     lt = safe(lambda: client.get_lactate_threshold(latest=True), "FC umbral")
     val = buscar_valor_recursivo(lt, ["heartRate", "lactateThresholdHeartRate", "value"])
@@ -146,8 +177,12 @@ def obtener_fc_umbral(client, activities=None):
         print(f"FC umbral: {manual} ppm (Secret GARMIN_FC_UMBRAL)")
         return int(manual)
 
-    # Estimación desde FC máx. El porcentaje es configurable por si quieres
-    # afinarlo: corredores entrenados suelen estar en 88-92% de la FC máx.
+    val = umbral_desde_zonas(client)
+    if val:
+        return val
+
+    # Estimación desde FC máx. Porcentaje configurable: corredores
+    # entrenados suelen situarse en 88-92% de la FC máx.
     try:
         pct = float(os.environ.get("GARMIN_UMBRAL_PCT", "88")) / 100.0
     except ValueError:
@@ -156,9 +191,15 @@ def obtener_fc_umbral(client, activities=None):
     fc_max, origen = obtener_fc_max(client, activities)
     if fc_max:
         estimado = int(round(fc_max * pct))
+        aviso = ""
+        if origen and "observada" in origen:
+            # La FC máx de una sesión cualquiera NO es la FC máx real del
+            # atleta salvo que ese día fuese a tope: subestima el techo y,
+            # por tanto, infla la intensidad relativa y el TSS.
+            aviso = " ⚠️ Basado en una sesión no máxima: el TSS saldrá inflado."
         print(
             f"FC umbral: {estimado} ppm ESTIMADO como {int(pct*100)}% de FC máx "
-            f"{fc_max} (origen: {origen}). El TSS resultante es orientativo."
+            f"{fc_max} (origen: {origen}).{aviso}"
         )
         return estimado
 
