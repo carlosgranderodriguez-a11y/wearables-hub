@@ -256,6 +256,13 @@ def enriquecer_actividad(client, a, actividad, fc_umbral, fc_reposo):
     actividad["ritmo_medio"] = formatea_ritmo(a.get("duration"), a.get("distance"))
     actividad["cadencia"] = a.get("averageRunningCadenceInStepsPerMinute")
 
+    # Identificador único y estable de la actividad en su plataforma de origen.
+    # Permite que el destino haga "upsert" en vez de insertar: si el sync se
+    # repite (relanzado a mano, reintento del cron...), la fila se actualiza
+    # en lugar de duplicarse.
+    if activity_id:
+        actividad["origen_id"] = f"garmin_{activity_id}"
+
     return actividad
 
 

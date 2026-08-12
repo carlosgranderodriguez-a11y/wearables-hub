@@ -137,6 +137,9 @@ def _payload_para_destino(destino, atleta_destino, actividad):
             "ritmo_medio": actividad.get("ritmo_medio") or "",
             "cadencia": actividad.get("cadencia") or "",
             "fuente_datos": fuente,
+            # Clave única de la actividad en origen: el backend la usa para
+            # actualizar en vez de duplicar si el sync se repite.
+            "origen_id": actividad.get("origen_id") or "",
         }
         return payload
 
