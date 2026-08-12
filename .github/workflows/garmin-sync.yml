@@ -29,4 +29,7 @@ jobs:
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           GARMIN_ATHLETE: CGR
           GARMIN_SYNC_DATE: ${{ github.event.inputs.fecha }}
+          # FC umbral para calcular hrTSS. Si no se define, se intenta leer
+          # de Garmin; si tampoco está, el hrTSS queda vacío.
+          GARMIN_FC_UMBRAL: ${{ secrets.GARMIN_FC_UMBRAL }}
         run: python connectors/garmin/sync.py
