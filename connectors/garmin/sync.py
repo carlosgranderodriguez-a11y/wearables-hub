@@ -23,6 +23,12 @@ import garminconnect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from core.schema import GARMIN_RUNNING_KEYS
 from core.destinations import enviar_actividad_a_destinos, enviar_wellness_a_triatlon
+from core.cargas import (
+    calcular_hrtss,
+    calcular_foster,
+    estimar_rpe_desde_zonas,
+    normalizar_zonas_garmin,
+)
 
 
 def safe(fn, label):
@@ -52,6 +58,83 @@ def normalizar_tipo(type_key):
     if "strength" in type_key or type_key == "fitness_equipment":
         return "strength"
     return "other"
+
+
+def obtener_fc_umbral(client):
+    """
+    FC umbral (LTHR) del atleta, necesaria para calcular hrTSS.
+
+    Se intenta leer de Garmin (test de umbral de lactato). Si Garmin no la
+    tiene, se puede fijar a mano con la variable de entorno GARMIN_FC_UMBRAL.
+    Sin umbral no se puede calcular hrTSS — se devuelve None y ese campo
+    simplemente queda vacío, sin romper el resto del sync.
+    """
+    manual = os.environ.get("GARMIN_FC_UMBRAL", "").strip()
+    if manual.isdigit():
+        return int(manual)
+
+    lt = safe(lambda: client.get_lactate_threshold(latest=True), "FC umbral")
+    if not lt:
+        return None
+    # La respuesta varía de forma según versión de la API; se buscan las
+    # claves más habituales sin asumir una estructura fija.
+    for key in ("heartRate", "lactateThresholdHeartRate", "value"):
+        val = lt.get(key) if isinstance(lt, dict) else None
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+    return None
+
+
+def formatea_ritmo(dur_seg, dist_m):
+    """Ritmo medio en mm:ss por km. Devuelve None si no aplica (ej. fuerza)."""
+    if not dur_seg or not dist_m or dist_m < 100:
+        return None
+    seg_por_km = dur_seg / (dist_m / 1000.0)
+    minutos = int(seg_por_km // 60)
+    segundos = int(round(seg_por_km % 60))
+    if segundos == 60:
+        minutos, segundos = minutos + 1, 0
+    return f"{minutos}:{segundos:02d}"
+
+
+def enriquecer_actividad(client, a, actividad, fc_umbral, fc_reposo):
+    """
+    Añade a la actividad las métricas ampliadas: tiempo en zonas de FC,
+    hrTSS, RPE estimado y carga Foster.
+
+    Cada dato es opcional: si Garmin no lo tiene para esa actividad
+    (por ejemplo una carrera sin pulsómetro), se deja vacío y el resto
+    del sync continúa igual.
+    """
+    activity_id = a.get("activityId")
+
+    # ── Tiempo en zonas de FC (usa las zonas configuradas por el atleta en Garmin) ──
+    if activity_id:
+        hr_zones = safe(
+            lambda: client.get_activity_hr_in_timezones(str(activity_id)),
+            f"zonas FC actividad {activity_id}",
+        )
+        actividad["zonas"] = normalizar_zonas_garmin(hr_zones)
+
+    # ── Cargas ──
+    actividad["tss"] = calcular_hrtss(
+        actividad["dur_min"], actividad["fc_avg"], fc_umbral, fc_reposo
+    )
+
+    # Garmin no aporta RPE; se estima desde la distribución de zonas.
+    # Si no hay zonas (sin pulsómetro), no se inventa: queda vacío para
+    # que el atleta lo rellene a mano en la app.
+    rpe = estimar_rpe_desde_zonas(actividad.get("zonas"))
+    actividad["rpe"] = rpe
+    actividad["rpe_estimado"] = bool(rpe)  # marca que NO lo puso el atleta
+    actividad["foster"] = calcular_foster(actividad["dur_min"], rpe)
+
+    # ── Métricas extra ──
+    actividad["desnivel_m"] = a.get("elevationGain")
+    actividad["ritmo_medio"] = formatea_ritmo(a.get("duration"), a.get("distance"))
+    actividad["cadencia"] = a.get("averageRunningCadenceInStepsPerMinute")
+
+    return actividad
 
 
 def main():
@@ -112,6 +195,17 @@ def main():
     enviar_wellness_a_triatlon(atleta_key, d, wellness)
 
     # ── Actividades (repartidas según core/destinations.py) ──
+    # La FC umbral y la de reposo se leen una sola vez y se reutilizan
+    # para calcular la carga de todas las actividades del día.
+    fc_umbral = obtener_fc_umbral(client)
+    fc_reposo = wellness.get("rhr")
+    if not fc_umbral:
+        print(
+            "⚠️  Sin FC umbral: no se podrá calcular hrTSS. "
+            "Puedes fijarla con el Secret GARMIN_FC_UMBRAL.",
+            file=sys.stderr,
+        )
+
     activities = safe(lambda: client.get_activities_by_date(d, today), "actividades")
     if activities:
         for a in activities:
@@ -125,6 +219,7 @@ def main():
                 "fc_max": a.get("maxHR"),
                 "fuente": "garmin",
             }
+            actividad = enriquecer_actividad(client, a, actividad, fc_umbral, fc_reposo)
             enviar_actividad_a_destinos(actividad)
 
 

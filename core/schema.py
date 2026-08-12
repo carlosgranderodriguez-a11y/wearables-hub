@@ -37,6 +37,14 @@ class Actividad:
     fc_avg: Optional[int] = None
     fc_max: Optional[int] = None
     fuente: str = ""
+    # ── Métricas ampliadas (pueden faltar según el reloj/actividad) ──
+    zonas: Optional[list] = None      # [{'z':1,'min':5.2}, ...] tiempo en cada zona de FC
+    tss: Optional[float] = None       # hrTSS calculado desde FC media y umbral
+    foster: Optional[float] = None    # carga Foster (RPE × minutos)
+    rpe: Optional[float] = None       # RPE usado para Foster (estimado si no lo da el reloj)
+    desnivel_m: Optional[float] = None
+    ritmo_medio: Optional[str] = None  # 'mm:ss' por km
+    cadencia: Optional[float] = None
 
     def to_dict(self):
         return {
@@ -48,7 +56,32 @@ class Actividad:
             "fc_avg": self.fc_avg,
             "fc_max": self.fc_max,
             "fuente": self.fuente,
+            "zonas": self.zonas,
+            "tss": self.tss,
+            "foster": self.foster,
+            "rpe": self.rpe,
+            "desnivel_m": self.desnivel_m,
+            "ritmo_medio": self.ritmo_medio,
+            "cadencia": self.cadencia,
         }
+
+
+# Colores por zona de FC, compartidos entre apps para que las gráficas
+# sean coherentes (Z1 gris-azul suave → Z5 rojo).
+ZONA_COLORES = {
+    1: "#60a5fa",  # azul  - recuperación
+    2: "#4ade80",  # verde - aeróbico ligero
+    3: "#fbbf24",  # ámbar - aeróbico medio
+    4: "#fb923c",  # naranja - umbral
+    5: "#ef4444",  # rojo  - VO2máx / anaeróbico
+}
+ZONA_NOMBRES = {
+    1: "Z1 · Recuperación",
+    2: "Z2 · Aeróbico",
+    3: "Z3 · Tempo",
+    4: "Z4 · Umbral",
+    5: "Z5 · VO2máx",
+}
 
 
 # Tipos de actividad "crudos" (tal cual los da cada marca) que consideramos

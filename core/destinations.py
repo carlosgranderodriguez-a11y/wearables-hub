@@ -6,7 +6,9 @@ Añadir una app nueva = añadir una entrada aquí. No hace falta tocar
 los conectores de marca ni el resto de la lógica.
 """
 
+import json
 import sys
+
 import requests
 
 # ── Triatlon-atleta ──
@@ -28,13 +30,15 @@ GYMCOACH_PRO = {
     "url": "https://script.google.com/macros/s/AKfycbzqXBcIAhrrXHXs2u1_jk8137QI17VxC_IKA3z15cm4ZKwlkTYFbB96zjKpoxk07B4yUA/exec",
     "acepta": {"running"},
     "atleta_map": {
-        "CGR": "Carlos Grande ",  # nombre exacto tal cual está en el Sheet de GymCoach Pro
+        "CGR": "Carlos Grande",  # nombre tal cual está en el Sheet de GymCoach Pro
     },
 }
 
 DESTINOS = [TRIATLON_ATLETA, GYMCOACH_PRO]
 
-DEFAULT_RPE = 6  # usado solo para destinos que necesitan RPE (ej. carga Foster)
+# Nota: el RPE ya no se fija por defecto. Se estima desde la distribución
+# de zonas de FC (ver core/cargas.py) y se marca como estimado para que el
+# atleta pueda corregirlo en la app. Si no hay pulsómetro, queda vacío.
 
 
 def enviar_actividad_a_destinos(actividad):
@@ -101,24 +105,39 @@ def _payload_para_destino(destino, atleta_destino, actividad):
     if destino["nombre"] == "gymcoach-pro":
         dur = actividad["dur_min"]
         dist = actividad["dist_km"]
-        return {
+        fuente = actividad["fuente"].capitalize()
+        zonas = actividad.get("zonas")
+        rpe = actividad.get("rpe")
+        payload = {
             "action": "addResistencia",
             "tipo": "sesion",
             "atleta": atleta_destino,
             "fecha": actividad["fecha"],
             "disciplina": "Carrera",
-            "nombre": f"Carrera ({actividad['fuente'].capitalize()})",
+            "nombre": f"Carrera ({fuente})",
             "duracion_min": dur,
             "distancia_km": dist,
             "rpe_objetivo": "",
-            "tss": "",
-            "descripcion": f"Sincronizado automáticamente desde {actividad['fuente'].capitalize()}.",
+            "tss": actividad.get("tss") or "",
+            "descripcion": f"Sincronizado automáticamente desde {fuente}.",
             "duracion_real": dur,
             "distancia_real": dist,
-            "rpe_real": DEFAULT_RPE,
+            "rpe_real": rpe if rpe is not None else "",
             "fc_media": actividad["fc_avg"] or "",
             "fc_max": actividad["fc_max"] or "",
             "notas_atleta": "",
+            # ── Campos ampliados ──
+            # zonas_real va serializado como JSON porque el backend guarda
+            # cada campo en una celda del Sheet.
+            "zonas_real": json.dumps(zonas) if zonas else "",
+            "tss_real": actividad.get("tss") or "",
+            "foster_real": actividad.get("foster") or "",
+            "rpe_estimado": "sí" if actividad.get("rpe_estimado") else "",
+            "desnivel_m": actividad.get("desnivel_m") or "",
+            "ritmo_medio": actividad.get("ritmo_medio") or "",
+            "cadencia": actividad.get("cadencia") or "",
+            "fuente_datos": fuente,
         }
+        return payload
 
     raise ValueError(f"Destino desconocido: {destino['nombre']}")
