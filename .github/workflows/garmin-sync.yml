@@ -29,7 +29,11 @@ jobs:
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           GARMIN_ATHLETE: CGR
           GARMIN_SYNC_DATE: ${{ github.event.inputs.fecha }}
-          # FC umbral para calcular hrTSS. Si no se define, se intenta leer
-          # de Garmin; si tampoco está, el hrTSS queda vacío.
+          # ── Ajuste del cálculo de hrTSS (todos opcionales) ──
+          # FC umbral medida. Si se define, tiene prioridad sobre la estimación.
           GARMIN_FC_UMBRAL: ${{ secrets.GARMIN_FC_UMBRAL }}
+          # FC máxima real, por si la que tiene Garmin está desactualizada.
+          GARMIN_FC_MAX: ${{ secrets.GARMIN_FC_MAX }}
+          # % de la FC máx usado para estimar el umbral (por defecto 88).
+          GARMIN_UMBRAL_PCT: ${{ vars.GARMIN_UMBRAL_PCT }}
         run: python connectors/garmin/sync.py
