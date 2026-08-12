@@ -65,8 +65,11 @@ def main():
     client = garminconnect.Garmin(email, password)
     client.login()
 
-    # Los datos de sueño/HRV/Body Battery de la noche corresponden al día "de ayer"
-    d = (date.today() - timedelta(days=1)).isoformat()
+    # Los datos de sueño/HRV/Body Battery de la noche corresponden al día "de ayer".
+    # Se puede forzar una fecha concreta (para recuperar un día que falló)
+    # con la variable de entorno GARMIN_SYNC_DATE=YYYY-MM-DD.
+    override = os.environ.get("GARMIN_SYNC_DATE", "").strip()
+    d = override if override else (date.today() - timedelta(days=1)).isoformat()
     today = date.today().isoformat()
 
     # ── Wellness (solo lo consume triatlon-atleta por ahora) ──

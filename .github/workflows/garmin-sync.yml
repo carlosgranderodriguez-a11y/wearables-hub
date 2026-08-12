@@ -3,7 +3,12 @@ name: Garmin daily sync
 on:
   schedule:
     - cron: "0 6 * * *"   # 06:00 UTC todos los días
-  workflow_dispatch: {}     # permite lanzarlo a mano desde GitHub
+  workflow_dispatch:        # permite lanzarlo a mano desde GitHub
+    inputs:
+      fecha:
+        description: "Fecha a recuperar (YYYY-MM-DD). Vacío = ayer (comportamiento normal)."
+        required: false
+        default: ""
 
 jobs:
   sync:
@@ -23,4 +28,5 @@ jobs:
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           GARMIN_ATHLETE: CGR
+          GARMIN_SYNC_DATE: ${{ github.event.inputs.fecha }}
         run: python connectors/garmin/sync.py
