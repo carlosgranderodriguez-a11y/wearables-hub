@@ -7,12 +7,17 @@ las normaliza al esquema común (core/schema.py) y las reparte a las apps
 configuradas en core/destinations.py.
 
 Se ejecuta automáticamente cada día vía GitHub Actions
-(ver .github/workflows/garmin-sync.yml).
+(ver .github/workflows/garmin-sync.yml), y también bajo demanda por atleta
+(botón "Sincronizar ahora" en la app → Apps Script → workflow_dispatch).
 
-Variables de entorno requeridas (GitHub Secrets):
-  GARMIN_EMAIL     - email de la cuenta de Garmin Connect
+Cada atleta tiene sus propias credenciales guardadas en un GitHub
+Environment con su clave (ej. "CGR", "nacho"), con estos dos secretos:
+  GARMIN_EMAIL     - email de la cuenta de Garmin Connect de ese atleta
   GARMIN_PASSWORD  - contraseña de esa cuenta
-  GARMIN_ATHLETE   - clave interna del atleta, ej. "CGR" (default: "CGR")
+El workflow selecciona el Environment según el input "atleta" del
+workflow_dispatch (por defecto "CGR" en el cron diario). El script en sí
+solo ve las variables de entorno ya resueltas:
+  GARMIN_EMAIL / GARMIN_PASSWORD / GARMIN_ATHLETE (clave interna, ej. "CGR")
 """
 import os
 import sys

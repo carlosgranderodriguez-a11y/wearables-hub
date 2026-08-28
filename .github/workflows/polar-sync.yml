@@ -3,7 +3,12 @@ name: Polar daily sync
 on:
   schedule:
     - cron: "15 6 * * *"   # 06:15 UTC, poco después del de Garmin
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      atleta:
+        description: "Clave del atleta a sincronizar (vacío = todos los de POLAR_ATLETAS, comportamiento normal)"
+        required: false
+        default: ""
 
 jobs:
   sync:
@@ -22,7 +27,10 @@ jobs:
         env:
           POLAR_CLIENT_ID: ${{ secrets.POLAR_CLIENT_ID }}
           POLAR_CLIENT_SECRET: ${{ secrets.POLAR_CLIENT_SECRET }}
-          POLAR_ATLETAS: ${{ vars.POLAR_ATLETAS }}
+          # Si se pide un atleta concreto (botón "Sincronizar ahora"), se usa solo
+          # ese; si no, se usa la lista completa de POLAR_ATLETAS (comportamiento
+          # normal del cron diario).
+          POLAR_ATLETAS: ${{ github.event.inputs.atleta || vars.POLAR_ATLETAS }}
           # Añade aquí un POLAR_ACCESS_TOKEN_<ATLETA> / POLAR_USER_ID_<ATLETA>
           # por cada atleta que se vaya vinculando (ver connectors/polar/authorize.py).
           # GitHub Actions no permite variables dinámicas aquí, así que hay que
