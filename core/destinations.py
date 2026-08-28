@@ -13,10 +13,13 @@ import requests
 
 # ── Triatlon-atleta ──
 # Recibe TODO (wellness + todas las actividades), tal y como funciona hoy.
+# Importante: al añadir categorías nuevas al catálogo (core/schema.py), hay
+# que añadirlas aquí también, o quedarían excluidas por el filtro de tipos
+# aunque antes pasaran genéricamente como "other".
 TRIATLON_ATLETA = {
     "nombre": "triatlon-atleta",
     "url": "https://script.google.com/macros/s/AKfycbz5e_jS99e3xB-DJMbIEm3L_HXoS2rkED_o3n0_U6S2Ihnc9vJ2E0gUIcYukv4ZyVXI/exec",
-    "acepta": {"running", "cycling", "swimming", "other"},  # todo tipo de actividad
+    "acepta": {"running", "cycling", "swimming", "strength", "padel", "tenis", "rowing", "futbol", "trail", "walking", "other"},  # todo tipo de actividad
     "atleta_map": {
         "CGR": "CGR",
         # "nacho": "nacho",  # cuando Nacho tenga su cuenta Garmin propia
@@ -24,11 +27,16 @@ TRIATLON_ATLETA = {
 }
 
 # ── GymCoach Pro ──
-# Solo recibe carreras (running), como sesiones de "Resistencia".
+# Antes solo recibía carreras (running). Ahora recibe cualquier actividad
+# "de campo" (todo lo que no sea fuerza), para que pádel, ciclismo, tenis,
+# remo, etc. también aparezcan como sesión de Resistencia con su disciplina
+# correcta. "strength" se excluye a propósito: las sesiones de fuerza ya
+# se registran dentro de la propia app (con series/reps), y mezclarlas
+# aquí como una sesión de resistencia genérica sería confuso.
 GYMCOACH_PRO = {
     "nombre": "gymcoach-pro",
     "url": "https://script.google.com/macros/s/AKfycbzqXBcIAhrrXHXs2u1_jk8137QI17VxC_IKA3z15cm4ZKwlkTYFbB96zjKpoxk07B4yUA/exec",
-    "acepta": {"running"},
+    "acepta": {"running", "cycling", "swimming", "padel", "tenis", "rowing", "futbol", "trail", "walking", "other"},
     "atleta_map": {
         "CGR": "Carlos Grande",  # nombre tal cual está en el Sheet de GymCoach Pro
     },
@@ -114,13 +122,14 @@ def _payload_para_destino(destino, atleta_destino, actividad):
         fuente = actividad["fuente"].capitalize()
         zonas = actividad.get("zonas")
         rpe = actividad.get("rpe")
+        disciplina = actividad.get("etiqueta") or "Carrera"
         payload = {
             "action": "addResistencia",
             "tipo": "sesion",
             "atleta": atleta_destino,
             "fecha": actividad["fecha"],
-            "disciplina": "Carrera",
-            "nombre": f"Carrera ({fuente})",
+            "disciplina": disciplina,
+            "nombre": f"{disciplina} ({fuente})",
             "duracion_min": dur,
             "distancia_km": dist,
             "rpe_objetivo": "",

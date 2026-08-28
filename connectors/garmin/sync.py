@@ -21,7 +21,7 @@ from datetime import date, timedelta, datetime, timezone
 import garminconnect
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from core.schema import GARMIN_RUNNING_KEYS
+from core.schema import GARMIN_RUNNING_KEYS, clasificar_actividad
 from core.destinations import enviar_actividad_a_destinos, enviar_wellness_a_triatlon
 from core.cargas import (
     calcular_hrtss,
@@ -49,25 +49,14 @@ def fmt_local_ts(ms):
 def normalizar_tipo(type_key):
     """Traduce el typeKey de Garmin a la categoría normalizada del hub.
 
-    Antes comprobaba solo pertenencia a GARMIN_RUNNING_KEYS (lista cerrada).
-    El problema: si Garmin etiqueta una carrera con un typeKey no previsto
-    (ej. "virtual_run", "obstacle_run", "ultra_run", carreras manuales...),
-    caía silenciosamente en "other" y GymCoach Pro (que solo acepta
-    "running") la descartaba sin avisar. Ahora, igual que ya se hacía con
-    ciclismo/natación, se usa coincidencia por texto: cualquier typeKey que
-    contenga "run" cuenta como carrera. GARMIN_RUNNING_KEYS se mantiene por
-    si algún typeKey concreto necesitara forzarse a mano en el futuro.
+    Delegado en core.schema.clasificar_actividad, que usa un catálogo
+    centralizado de deportes (running, ciclismo, natación, pádel, tenis,
+    remo, fútbol, trail, caminata...) compartido por todos los conectores.
+    Cualquier typeKey no reconocido cae en "other" con una etiqueta
+    legible generada a partir del propio typeKey, en vez de perderse.
     """
-    type_key = (type_key or "").lower()
-    if type_key in GARMIN_RUNNING_KEYS or "run" in type_key:
-        return "running"
-    if "cycling" in type_key or "biking" in type_key:
-        return "cycling"
-    if "swim" in type_key:
-        return "swimming"
-    if "strength" in type_key or type_key == "fitness_equipment":
-        return "strength"
-    return "other"
+    categoria, _etiqueta = clasificar_actividad(type_key)
+    return categoria
 
 
 def buscar_valor_recursivo(obj, claves):
@@ -346,13 +335,14 @@ def main():
         print(f"📋 {len(activities)} actividad(es) encontrada(s) para {d}→{today}:")
         for a in activities:
             type_key_raw = (a.get("activityType") or {}).get("typeKey")
-            tipo = normalizar_tipo(type_key_raw)
+            tipo, etiqueta = clasificar_actividad(type_key_raw)
             nombre_act = a.get("activityName") or "(sin nombre)"
-            print(f"   • '{nombre_act}' — typeKey Garmin: '{type_key_raw}' → clasificada como '{tipo}'")
+            print(f"   • '{nombre_act}' — typeKey Garmin: '{type_key_raw}' → clasificada como '{tipo}' ({etiqueta})")
             actividad = {
                 "atleta_key": atleta_key,
                 "fecha": d,
                 "tipo": tipo,
+                "etiqueta": etiqueta,
                 "dur_min": round((a.get("duration") or 0) / 60, 1),
                 "dist_km": round((a.get("distance") or 0) / 1000, 2),
                 "fc_avg": a.get("averageHR"),

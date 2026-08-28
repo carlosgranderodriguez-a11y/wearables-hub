@@ -31,7 +31,8 @@ from typing import Optional
 class Actividad:
     atleta_key: str
     fecha: str
-    tipo: str          # 'running' | 'cycling' | 'swimming' | 'strength' | 'other'
+    tipo: str          # categoría interna: 'running' | 'cycling' | 'swimming' | 'strength' | 'padel' | 'tenis' | 'rowing' | 'futbol' | 'trail' | 'walking' | 'other'
+    etiqueta: str = ""  # nombre legible en ES para mostrar como "disciplina" (ver CATALOGO_DEPORTES)
     dur_min: float = 0
     dist_km: float = 0
     fc_avg: Optional[int] = None
@@ -51,6 +52,7 @@ class Actividad:
             "atleta_key": self.atleta_key,
             "fecha": self.fecha,
             "tipo": self.tipo,
+            "etiqueta": self.etiqueta,
             "dur_min": self.dur_min,
             "dist_km": self.dist_km,
             "fc_avg": self.fc_avg,
@@ -85,8 +87,48 @@ ZONA_NOMBRES = {
 
 
 # Tipos de actividad "crudos" (tal cual los da cada marca) que consideramos
-# running. Cada conector mapea aquí sus propios valores.
+# running. Se mantiene por compatibilidad; el reconocimiento real ahora
+# usa coincidencia de texto (ver CATALOGO_DEPORTES más abajo).
 GARMIN_RUNNING_KEYS = {
     "running", "trail_running", "treadmill_running",
     "track_running", "indoor_running", "street_running",
 }
+
+# Catálogo de deportes reconocidos, en orden de prioridad (el primero que
+# coincida por substring en el typeKey de la marca gana). Cada entrada:
+#   (categoria interna, [substrings a buscar en el typeKey], etiqueta en ES)
+#
+# La "categoria interna" es la que usan destinations.py y cargas.py para
+# decidir cálculos y enrutado. La "etiqueta en ES" es la que ve Carlos en
+# GymCoach Pro como "disciplina" — coincide con DISC_ICONS de index.html
+# donde ya existe una entrada equivalente, para que salga con su icono.
+#
+# Para reconocer un deporte nuevo (ej. pádel, pickleball...) basta con
+# añadir una línea aquí: no hace falta tocar los conectores.
+CATALOGO_DEPORTES = [
+    ("running",  ["run"],                                   "Carrera"),
+    ("cycling",  ["cycling", "biking", "bike", "mtb"],       "Ciclismo ruta"),
+    ("swimming", ["swim"],                                   "Natación"),
+    ("strength", ["strength", "fitness_equipment"],          "Fuerza"),
+    ("padel",    ["padel", "paddle_tennis"],                 "Pádel"),
+    ("tenis",    ["tennis"],                                 "Tenis"),
+    ("rowing",   ["rowing"],                                 "Remo"),
+    ("futbol",   ["soccer", "football"],                     "Fútbol"),
+    ("trail",    ["hiking", "mountaineering"],                "Trail"),
+    ("walking",  ["walking"],                                "Caminata"),
+]
+
+
+def clasificar_actividad(type_key):
+    """
+    Clasifica el typeKey crudo de una marca contra CATALOGO_DEPORTES.
+    Devuelve (categoria_interna, etiqueta_en_es). Si no reconoce nada,
+    devuelve ("other", etiqueta_legible_generada_del_typeKey) — nunca
+    se pierde silenciosamente, aunque no esté en el catálogo.
+    """
+    tk = (type_key or "").lower()
+    for categoria, patrones, etiqueta in CATALOGO_DEPORTES:
+        if any(p in tk for p in patrones):
+            return categoria, etiqueta
+    generica = (type_key or "Actividad").replace("_", " ").strip().title() or "Actividad"
+    return "other", generica

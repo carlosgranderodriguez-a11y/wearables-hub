@@ -27,29 +27,9 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from core.destinations import enviar_actividad_a_destinos
+from core.schema import clasificar_actividad
 
 BASE_URL = "https://www.polaraccesslink.com/v3"
-
-# Sport keys de Polar que consideramos "running". Polar usa nombres como
-# RUNNING, TRAIL_RUNNING, TRACK_AND_FIELD_RUNNING, etc.
-POLAR_RUNNING_KEYS = {
-    "RUNNING", "TRAIL_RUNNING", "TRACK_AND_FIELD_RUNNING", "TREADMILL_RUNNING",
-}
-POLAR_CYCLING_KEYS = {"CYCLING", "MOUNTAIN_BIKING", "ROAD_BIKING", "INDOOR_CYCLING"}
-POLAR_SWIM_KEYS = {"SWIMMING", "OPEN_WATER_SWIMMING", "POOL_SWIMMING"}
-
-
-def normalizar_tipo(sport):
-    sport = (sport or "").upper()
-    if sport in POLAR_RUNNING_KEYS:
-        return "running"
-    if sport in POLAR_CYCLING_KEYS:
-        return "cycling"
-    if sport in POLAR_SWIM_KEYS:
-        return "swimming"
-    if "STRENGTH" in sport:
-        return "strength"
-    return "other"
 
 
 def sync_atleta(atleta_key):
@@ -84,11 +64,13 @@ def sync_atleta(atleta_key):
 
         duracion = ex.get("duration", "PT0S")  # formato ISO 8601, ej. "PT1H5M30S"
         dur_min = round(_parse_iso_duration_seconds(duracion) / 60, 1)
+        tipo, etiqueta = clasificar_actividad(ex.get("sport"))
 
         actividad = {
             "atleta_key": atleta_key,
             "fecha": (ex.get("start-time") or "")[:10],
-            "tipo": normalizar_tipo(ex.get("sport")),
+            "tipo": tipo,
+            "etiqueta": etiqueta,
             "dur_min": dur_min,
             "dist_km": round((ex.get("distance") or 0) / 1000, 2),
             "fc_avg": (ex.get("heart-rate") or {}).get("average"),
