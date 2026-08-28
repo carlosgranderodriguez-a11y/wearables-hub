@@ -47,19 +47,25 @@ def enviar_actividad_a_destinos(actividad):
     la acepten (por tipo) y tengan mapeo para ese atleta.
     `actividad` es un dict con las claves de core.schema.Actividad.
     """
+    enviada_a_alguno = False
     for destino in DESTINOS:
         if actividad["tipo"] not in destino["acepta"]:
+            print(f"   ↳ omitida para [{destino['nombre']}]: tipo '{actividad['tipo']}' no está en {sorted(destino['acepta'])}")
             continue
         atleta_destino = destino["atleta_map"].get(actividad["atleta_key"])
         if not atleta_destino:
+            print(f"   ↳ omitida para [{destino['nombre']}]: atleta '{actividad['atleta_key']}' sin mapeo en atleta_map")
             continue  # este atleta no está vinculado a esta app
 
         payload = _payload_para_destino(destino, atleta_destino, actividad)
         try:
             resp = requests.post(destino["url"], json=payload, timeout=30)
             print(f"[{destino['nombre']}] → {resp.status_code}: {resp.text[:200]}")
+            enviada_a_alguno = True
         except Exception as e:
             print(f"⚠️  Aviso: fallo enviando a {destino['nombre']} ({e})", file=sys.stderr)
+    if not enviada_a_alguno:
+        print(f"   ⚠️  Esta actividad (tipo '{actividad['tipo']}') no se envió a NINGÚN destino.")
 
 
 def enviar_wellness_a_triatlon(atleta_key, fecha, wellness):

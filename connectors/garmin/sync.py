@@ -47,9 +47,19 @@ def fmt_local_ts(ms):
 
 
 def normalizar_tipo(type_key):
-    """Traduce el typeKey de Garmin a la categoría normalizada del hub."""
+    """Traduce el typeKey de Garmin a la categoría normalizada del hub.
+
+    Antes comprobaba solo pertenencia a GARMIN_RUNNING_KEYS (lista cerrada).
+    El problema: si Garmin etiqueta una carrera con un typeKey no previsto
+    (ej. "virtual_run", "obstacle_run", "ultra_run", carreras manuales...),
+    caía silenciosamente en "other" y GymCoach Pro (que solo acepta
+    "running") la descartaba sin avisar. Ahora, igual que ya se hacía con
+    ciclismo/natación, se usa coincidencia por texto: cualquier typeKey que
+    contenga "run" cuenta como carrera. GARMIN_RUNNING_KEYS se mantiene por
+    si algún typeKey concreto necesitara forzarse a mano en el futuro.
+    """
     type_key = (type_key or "").lower()
-    if type_key in GARMIN_RUNNING_KEYS:
+    if type_key in GARMIN_RUNNING_KEYS or "run" in type_key:
         return "running"
     if "cycling" in type_key or "biking" in type_key:
         return "cycling"
@@ -333,11 +343,16 @@ def main():
     fc_reposo = wellness.get("rhr")
 
     if activities:
+        print(f"📋 {len(activities)} actividad(es) encontrada(s) para {d}→{today}:")
         for a in activities:
+            type_key_raw = (a.get("activityType") or {}).get("typeKey")
+            tipo = normalizar_tipo(type_key_raw)
+            nombre_act = a.get("activityName") or "(sin nombre)"
+            print(f"   • '{nombre_act}' — typeKey Garmin: '{type_key_raw}' → clasificada como '{tipo}'")
             actividad = {
                 "atleta_key": atleta_key,
                 "fecha": d,
-                "tipo": normalizar_tipo((a.get("activityType") or {}).get("typeKey")),
+                "tipo": tipo,
                 "dur_min": round((a.get("duration") or 0) / 60, 1),
                 "dist_km": round((a.get("distance") or 0) / 1000, 2),
                 "fc_avg": a.get("averageHR"),
@@ -346,6 +361,8 @@ def main():
             }
             actividad = enriquecer_actividad(client, a, actividad, fc_umbral, fc_reposo)
             enviar_actividad_a_destinos(actividad)
+    else:
+        print(f"📋 Sin actividades encontradas para {d}→{today}.")
 
 
 if __name__ == "__main__":
