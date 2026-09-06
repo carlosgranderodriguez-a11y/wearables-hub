@@ -10,14 +10,28 @@ Se ejecuta automáticamente cada día vía GitHub Actions
 (ver .github/workflows/garmin-sync.yml), y también bajo demanda por atleta
 (botón "Sincronizar ahora" en la app → Apps Script → workflow_dispatch).
 
-Cada atleta tiene sus propias credenciales guardadas en un GitHub
-Environment con su clave (ej. "CGR", "nacho"), con estos dos secretos:
-  GARMIN_EMAIL     - email de la cuenta de Garmin Connect de ese atleta
-  GARMIN_PASSWORD  - contraseña de esa cuenta
-El workflow selecciona el Environment según el input "atleta" del
-workflow_dispatch (por defecto "CGR" en el cron diario). El script en sí
-solo ve las variables de entorno ya resueltas:
-  GARMIN_EMAIL / GARMIN_PASSWORD / GARMIN_ATHLETE (clave interna, ej. "CGR")
+Cada atleta vinculado tiene sus credenciales en GitHub Secrets con su
+clave como sufijo (mismo patrón que Polar — ver connectors/polar/sync.py
+y README.md):
+  GARMIN_EMAIL_<ATLETA>     ej. GARMIN_EMAIL_CGR, GARMIN_EMAIL_NACHO
+  GARMIN_PASSWORD_<ATLETA>  ej. GARMIN_PASSWORD_CGR, GARMIN_PASSWORD_NACHO
+Y la lista de atletas a sincronizar en la variable GARMIN_ATLETAS
+(separados por coma), ej. "CGR,nacho".
+
+El cron diario sincroniza a TODOS los de GARMIN_ATLETAS. El botón
+"Sincronizar ahora" (workflow_dispatch con el input "atleta") sincroniza
+solo a uno, sin tocar a los demás.
+
+Opcionalmente, GARMIN_FC_UMBRAL / GARMIN_FC_MAX admiten también un
+sufijo por atleta (ej. GARMIN_FC_UMBRAL_NACHO); si no existe, se usa la
+versión sin sufijo como valor por defecto compartido.
+
+Nuevo atleta conectado vía el conector self-service (ver wearables-hub
+README, sección "Conectar un atleta nuevo (Garmin/Huawei/Coros)"): el
+propio relay ya escribe GARMIN_EMAIL_<ATLETA> / GARMIN_PASSWORD_<ATLETA>
+y añade su clave a GARMIN_ATLETAS — lo único que queda pendiente a mano
+es declarar esas dos env vars nuevas en garmin-sync.yml (GitHub Actions
+no permite nombres de secret dinámicos en la sintaxis de un workflow).
 """
 import os
 import sys
@@ -90,12 +104,24 @@ def buscar_valor_recursivo(obj, claves):
     return None
 
 
-def obtener_fc_max(client, activities=None):
+def env_atleta_(base, atleta_key):
+    """
+    Lee una variable de entorno con sufijo por atleta si existe
+    (ej. GARMIN_FC_UMBRAL_NACHO), y si no, cae a la versión sin sufijo
+    como valor por defecto compartido (ej. GARMIN_FC_UMBRAL).
+    """
+    val = os.environ.get(f"{base}_{atleta_key.upper()}", "").strip()
+    if val:
+        return val
+    return os.environ.get(base, "").strip()
+
+
+def obtener_fc_max(client, atleta_key, activities=None):
     """
     FC máxima del atleta, probando varias fuentes en orden de fiabilidad.
     Se usa para estimar el umbral cuando Garmin no lo tiene medido.
     """
-    manual = os.environ.get("GARMIN_FC_MAX", "").strip()
+    manual = env_atleta_("GARMIN_FC_MAX", atleta_key)
     if manual.isdigit():
         return int(manual), "Secret GARMIN_FC_MAX"
 
@@ -155,13 +181,13 @@ def umbral_desde_zonas(client):
     return None
 
 
-def obtener_fc_umbral(client, activities=None):
+def obtener_fc_umbral(client, atleta_key, activities=None):
     """
     FC umbral (LTHR), necesaria para calcular hrTSS.
 
     Prioridad, de más a menos fiable:
       1. Umbral medido que Garmin mantiene (test de lactato).
-      2. Secret GARMIN_FC_UMBRAL, si lo has fijado a mano.
+      2. Secret GARMIN_FC_UMBRAL[_<ATLETA>], si lo has fijado a mano.
       3. Inicio de la Zona 4 configurada en Garmin — por definición, el umbral.
       4. Porcentaje de la FC máxima (88% por defecto).
 
@@ -176,7 +202,7 @@ def obtener_fc_umbral(client, activities=None):
         print(f"FC umbral: {val} ppm (medido por Garmin)")
         return val
 
-    manual = os.environ.get("GARMIN_FC_UMBRAL", "").strip()
+    manual = env_atleta_("GARMIN_FC_UMBRAL", atleta_key)
     if manual.isdigit():
         print(f"FC umbral: {manual} ppm (Secret GARMIN_FC_UMBRAL)")
         return int(manual)
@@ -192,7 +218,7 @@ def obtener_fc_umbral(client, activities=None):
     except ValueError:
         pct = 0.88
 
-    fc_max, origen = obtener_fc_max(client, activities)
+    fc_max, origen = obtener_fc_max(client, atleta_key, activities)
     if fc_max:
         estimado = int(round(fc_max * pct))
         aviso = ""
@@ -270,13 +296,12 @@ def enriquecer_actividad(client, a, actividad, fc_umbral, fc_reposo):
     return actividad
 
 
-def main():
-    email = os.environ.get("GARMIN_EMAIL")
-    password = os.environ.get("GARMIN_PASSWORD")
-    atleta_key = os.environ.get("GARMIN_ATHLETE", "CGR")
+def sync_atleta(atleta_key):
+    email = os.environ.get(f"GARMIN_EMAIL_{atleta_key.upper()}")
+    password = os.environ.get(f"GARMIN_PASSWORD_{atleta_key.upper()}")
     if not email or not password:
-        print("❌ Faltan GARMIN_EMAIL / GARMIN_PASSWORD en el entorno", file=sys.stderr)
-        sys.exit(1)
+        print(f"⚠️  Faltan credenciales Garmin para '{atleta_key}' (GARMIN_EMAIL_{atleta_key.upper()} / GARMIN_PASSWORD_{atleta_key.upper()}), se salta.", file=sys.stderr)
+        return
 
     client = garminconnect.Garmin(email, password)
     client.login()
@@ -333,7 +358,7 @@ def main():
     # La FC umbral y la de reposo se calculan una sola vez y se reutilizan
     # para todas las actividades del día. Se pasan las actividades porque,
     # si no hay otra fuente, la FC máx observada sirve de último recurso.
-    fc_umbral = obtener_fc_umbral(client, activities)
+    fc_umbral = obtener_fc_umbral(client, atleta_key, activities)
     fc_reposo = wellness.get("rhr")
 
     if activities:
@@ -358,6 +383,29 @@ def main():
             enviar_actividad_a_destinos(actividad)
     else:
         print(f"📋 Sin actividades encontradas para {d}→{today}.")
+
+
+def main():
+    # workflow_dispatch con el input "atleta" (botón "Sincronizar ahora"):
+    # sincroniza solo a ese, sin tocar a los demás.
+    atleta_unico = os.environ.get("GARMIN_ATHLETE", "").strip()
+    if atleta_unico:
+        atletas = [atleta_unico]
+    else:
+        atletas = [a.strip() for a in os.environ.get("GARMIN_ATLETAS", "").split(",") if a.strip()]
+
+    if not atletas:
+        print("❌ No hay atletas configurados en GARMIN_ATLETAS", file=sys.stderr)
+        sys.exit(1)
+
+    for atleta_key in atletas:
+        print(f"── Garmin: {atleta_key} ──")
+        try:
+            sync_atleta(atleta_key)
+        except Exception as e:
+            # Un fallo con un atleta (login caducado, credenciales cambiadas...)
+            # no debe impedir que se sincronicen los demás.
+            print(f"⚠️  Aviso: fallo sincronizando a '{atleta_key}' ({e})", file=sys.stderr)
 
 
 if __name__ == "__main__":
