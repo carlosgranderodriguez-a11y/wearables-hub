@@ -49,9 +49,24 @@ No hace falta tocar los conectores de marca.
 
 ## Secrets necesarios (GitHub Actions)
 
-**Garmin:**
-- `GARMIN_EMAIL`
-- `GARMIN_PASSWORD`
+**Garmin** (por atleta vinculado, mismo patrón que Polar):
+- `GARMIN_EMAIL_<ATLETA>` ej. `GARMIN_EMAIL_CGR`, `GARMIN_EMAIL_NACHO`
+- `GARMIN_PASSWORD_<ATLETA>` ej. `GARMIN_PASSWORD_CGR`, `GARMIN_PASSWORD_NACHO`
+- Opcionales, admiten también sufijo `_<ATLETA>` (si no existe esa
+  variante, se usa la versión sin sufijo como valor por defecto):
+  `GARMIN_FC_UMBRAL`, `GARMIN_FC_MAX`
+
+Y la variable `GARMIN_ATLETAS` con la lista separada por comas de
+atletas a sincronizar en el cron diario, ej. `CGR,nacho`.
+
+Cada atleta nuevo en Garmin implica: 1) sus dos secrets
+`GARMIN_EMAIL_X` / `GARMIN_PASSWORD_X` — el conector self-service (ver
+"Conectar un atleta nuevo" más abajo) ya los escribe él solo, sin que
+nadie los vea en texto plano — 2) su clave se añade sola a
+`GARMIN_ATLETAS` cuando se conecta, y 3) una línea
+`GARMIN_EMAIL_X` / `GARMIN_PASSWORD_X` en `.github/workflows/garmin-sync.yml`
+(paso manual, una sola vez por atleta — GitHub Actions no permite
+nombres de secret dinámicos).
 
 **Polar** (por app, una sola vez):
 - `POLAR_CLIENT_ID`
@@ -74,6 +89,34 @@ explícitamente).
 
 (Huawei/Coros usarán tokens OAuth2 por atleta cuando se implementen —
 ver cada conector.)
+
+## Conectar un atleta nuevo (Garmin/Huawei/Coros) sin que nadie vea su contraseña
+
+Para marcas de email+contraseña (Garmin, y Huawei/Coros cuando se
+implementen), hay un relay independiente (`relay-conector/` — proyecto
+Apps Script aparte, no confundir con el de la Sheet de triatlon-atleta)
+que recibe el email/contraseña del atleta desde una página web sencilla
+y los escribe directamente como GitHub Secrets cifrados con la clave
+pública del repo (`crypto_box_seal`, igual que hace `gh secret set` o la
+propia web de GitHub). Una vez escritos, los Secrets de GitHub son de
+solo escritura — ni el dueño del repo puede volver a leerlos por la UI
+ni por la API — así que el entrenador nunca ve, guarda ni gestiona esa
+contraseña en ningún momento.
+
+Flujo:
+1. El entrenador genera un enlace de un solo uso para ese atleta y esa
+   marca (`createInviteLink_('nacho', 'garmin')` desde el editor de
+   Apps Script del relay) y se lo manda.
+2. El atleta abre el enlace, mete su email/contraseña, pulsa conectar.
+3. El relay cifra y escribe `GARMIN_EMAIL_<ATLETA>` /
+   `GARMIN_PASSWORD_<ATLETA>` en este repo, y añade su clave a
+   `GARMIN_ATLETAS` si no estaba ya.
+4. Queda un único paso manual (ver arriba): añadir esa línea de secret
+   en `garmin-sync.yml` la primera vez que ese atleta se conecta.
+
+Añadir Huawei/Coros a este mismo relay es solo añadir su entrada al
+`BRAND_CONFIG` del relay (`secretNames`, `athleteListVar`) — no hace
+falta tocar la parte de cifrado ni el flujo de invitación.
 
 ## Atletas vinculados actualmente
 
