@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#0f1115; color:#e8e8ec; margin:0; padding:0; display:flex; min-height:100vh; align-items:center; justify-content:center; }
+    .card { background:#1a1d24; border:1px solid #2a2e38; border-radius:14px; padding:32px; width:100%; max-width:380px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
+    h1 { font-size:20px; margin:0 0 6px; }
+    p.sub { color:#9aa0ac; font-size:14px; margin:0 0 24px; line-height:1.4; }
+    label { display:block; font-size:13px; color:#c4c8d0; margin:16px 0 6px; }
+    input[type=email], input[type=password] {
+      width:100%; box-sizing:border-box; padding:11px 12px; border-radius:8px;
+      border:1px solid #333844; background:#12141a; color:#fff; font-size:15px;
+    }
+    input:focus { outline:none; border-color:#4f8cff; }
+    button {
+      margin-top:24px; width:100%; padding:12px; border:none; border-radius:8px;
+      background:#4f8cff; color:#fff; font-size:15px; font-weight:600; cursor:pointer;
+    }
+    button:disabled { opacity:.6; cursor:default; }
+    .msg { margin-top:16px; font-size:14px; line-height:1.4; padding:12px; border-radius:8px; display:none; }
+    .msg.ok { background:#16321f; color:#7ee3a0; display:block; }
+    .msg.err { background:#3a1620; color:#ff8f9c; display:block; }
+    .lock-note { display:flex; gap:8px; align-items:flex-start; margin-top:20px; font-size:12.5px; color:#7c828d; line-height:1.4; }
+    .lock-note svg { flex:none; margin-top:2px; }
+    .invalid { text-align:center; color:#ff8f9c; font-size:15px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <? if (valid) { ?>
+      <h1>Conecta tu cuenta <?= brandLabel ?></h1>
+      <p class="sub">Tu entrenador nunca ve ni guarda esta contraseña — se cifra en el momento y se manda directamente y de forma segura a donde se sincronizan tus entrenamientos.</p>
+      <form id="f">
+        <label for="email">Email</label>
+        <input type="email" id="email" required autocomplete="username">
+        <label for="password">Contraseña</label>
+        <input type="password" id="password" required autocomplete="current-password">
+        <button type="submit" id="btn">Conectar</button>
+      </form>
+      <div id="msg" class="msg"></div>
+      <div class="lock-note">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span>Este enlace es de un solo uso y solo para ti. Una vez enviada, la contraseña queda cifrada y nadie —ni tu entrenador— puede volver a verla.</span>
+      </div>
+    <? } else { ?>
+      <h1>Enlace no válido</h1>
+      <p class="invalid">Este enlace ya se usó o ha caducado. Pide uno nuevo a tu entrenador.</p>
+    <? } ?>
+  </div>
+
+  <script>
+    var form = document.getElementById('f');
+    if (form) {
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var btn = document.getElementById('btn');
+        var msg = document.getElementById('msg');
+        btn.disabled = true;
+        btn.textContent = 'Conectando…';
+        msg.className = 'msg';
+        msg.textContent = '';
+
+        google.script.run
+          .withSuccessHandler(function (res) {
+            if (res.ok) {
+              msg.className = 'msg ok';
+              msg.textContent = res.message;
+              form.style.display = 'none';
+            } else {
+              msg.className = 'msg err';
+              msg.textContent = res.error || 'Algo ha fallado. Prueba de nuevo o pide un enlace nuevo.';
+              btn.disabled = false;
+              btn.textContent = 'Conectar';
+            }
+          })
+          .withFailureHandler(function (err) {
+            msg.className = 'msg err';
+            msg.textContent = 'Error de conexión: ' + err.message;
+            btn.disabled = false;
+            btn.textContent = 'Conectar';
+          })
+          .submitConnect(
+            '<?= token ?>',
+            document.getElementById('email').value,
+            document.getElementById('password').value
+          );
+      });
+    }
+  </script>
+</body>
+</html>
