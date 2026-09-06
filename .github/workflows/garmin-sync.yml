@@ -2,13 +2,13 @@ name: Garmin daily sync
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC todos los días — sincroniza a CGR (por defecto)
+    - cron: "0 6 * * *"   # 06:00 UTC todos los días — sincroniza a todos los de GARMIN_ATLETAS
   workflow_dispatch:        # permite lanzarlo a mano, o bajo demanda desde el botón de la app
     inputs:
       atleta:
-        description: "Clave del atleta a sincronizar (debe existir como Environment con sus secretos GARMIN_EMAIL/GARMIN_PASSWORD)"
+        description: "Clave del atleta a sincronizar (vacío = todos los de GARMIN_ATLETAS, comportamiento normal)"
         required: false
-        default: "CGR"
+        default: ""
       fecha:
         description: "Fecha a recuperar (YYYY-MM-DD). Vacío = ayer (comportamiento normal)."
         required: false
@@ -17,11 +17,6 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # El Environment selecciona qué secretos GARMIN_EMAIL/GARMIN_PASSWORD se usan.
-    # En el cron diario (sin input) siempre es CGR. Al lanzarlo a mano/vía botón,
-    # se usa el atleta pedido — para eso, cada atleta necesita su propio
-    # Environment creado en Settings → Environments, con esos dos secretos.
-    environment: ${{ github.event.inputs.atleta || 'CGR' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,11 +29,20 @@ jobs:
 
       - name: Ejecutar sync de Garmin
         env:
-          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
-          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
-          GARMIN_ATHLETE: ${{ github.event.inputs.atleta || 'CGR' }}
+          # Si se pide un atleta concreto (botón "Sincronizar ahora"), se usa solo
+          # ese; si no, se usa la lista completa de GARMIN_ATLETAS (comportamiento
+          # normal del cron diario). El propio script decide con cuál sincronizar.
+          GARMIN_ATHLETE: ${{ github.event.inputs.atleta }}
+          GARMIN_ATLETAS: ${{ vars.GARMIN_ATLETAS }}
           GARMIN_SYNC_DATE: ${{ github.event.inputs.fecha }}
-          # ── Ajuste del cálculo de hrTSS (todos opcionales) ──
+          # Añade aquí un GARMIN_EMAIL_<ATLETA> / GARMIN_PASSWORD_<ATLETA> por
+          # cada atleta que se vaya vinculando (el conector self-service ya
+          # escribe esos secrets solo — ver README — pero GitHub Actions no
+          # permite nombres de secret dinámicos, así que hace falta declarar
+          # cada línea aquí a mano una vez, la primera vez que se conecta):
+          GARMIN_EMAIL_CGR: ${{ secrets.GARMIN_EMAIL_CGR }}
+          GARMIN_PASSWORD_CGR: ${{ secrets.GARMIN_PASSWORD_CGR }}
+          # ── Ajuste del cálculo de hrTSS (todos opcionales, admiten sufijo _<ATLETA>) ──
           # FC umbral medida. Si se define, tiene prioridad sobre la estimación.
           GARMIN_FC_UMBRAL: ${{ secrets.GARMIN_FC_UMBRAL }}
           # FC máxima real, por si la que tiene Garmin está desactualizada.
